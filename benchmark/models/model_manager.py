@@ -44,6 +44,6 @@ def config_model(model: torch.nn.Module, args, mode: str) -> None:
         except FileNotFoundError:
             print(f'#E#Checkpoint not found at {os.path.abspath(args.test_ckpt)}')
             exit(1)
-        model.load_state_dict(ckpt['state_dict'])
-        print(f'#IN#Loading best Checkpoint {ckpt["epoch"]}...')
+        model.load_state_dict(ckpt)
+        print(f'#IN#Loading best Checkpoint ...')
 

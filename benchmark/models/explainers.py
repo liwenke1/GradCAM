@@ -71,6 +71,8 @@ from benchmark.models.ext.deeplift.layer_deep_lift import LayerDeepLift, DeepLif
 import shap
 import time
 
+from dgl import DGLGraph
+
 EPS = 1e-15
 
 
@@ -447,6 +449,17 @@ class ExplainerBase(nn.Module):
 
         return ax, G
 
+    def type_conversion(self, x, edge_index, edge_attr):
+        graph = DGLGraph()
+        x=x.cpu()
+        graph.add_nodes(len(x), data={'features': torch.FloatTensor(x)})
+        edge_index_list = edge_index.cpu().t().numpy().tolist()
+        edge_attr_list = edge_attr.cpu().numpy().tolist()
+        for i in range(len(edge_index_list)):
+            graph.add_edges(edge_index_list[i][0], edge_index_list[i][1], data={'etype': torch.LongTensor([edge_attr_list[i][0]])})
+        
+        return graph
+
     def eval_related_pred(self, x, edge_index, edge_masks, **kwargs):
 
         node_idx = kwargs.get('node_idx')
@@ -573,7 +586,7 @@ class WalkBase(ExplainerBase):
 
         return walk_indices_list
 
-    def eval_related_pred(self, x, edge_index, masks, **kwargs):
+    def eval_related_pred(self, x, edge_index, edge_attr, masks, **kwargs):
 
         node_idx = kwargs.get('node_idx')
         node_idx = 0 if node_idx is None else node_idx # graph level: 0, node level: node_idx
@@ -584,21 +597,25 @@ class WalkBase(ExplainerBase):
             # origin pred
             for edge_mask in self.edge_mask:
                 edge_mask.data = float('inf') * torch.ones(mask.size(), device=data_args.device)
-            ori_pred = self.model(x=x, edge_index=edge_index, **kwargs)
+            graph = self.type_conversion(x, edge_index, edge_attr)
+            ori_pred = self.model(graph, cuda=True)
 
             for edge_mask in self.edge_mask:
                 edge_mask.data = mask
-            masked_pred = self.model(x=x, edge_index=edge_index, **kwargs)
+            graph = self.type_conversion(x, edge_index, edge_attr)
+            masked_pred = self.model(graph, cuda=True)
 
             # mask out important elements for fidelity calculation
             for edge_mask in self.edge_mask:
                 edge_mask.data = - mask
-            maskout_pred = self.model(x=x, edge_index=edge_index, **kwargs)
+            graph = self.type_conversion(x, edge_index, edge_attr)
+            maskout_pred = self.model(graph, cuda=True)
 
             # zero_mask
             for edge_mask in self.edge_mask:
                 edge_mask.data = - float('inf') * torch.ones(mask.size(), device=data_args.device)
-            zero_mask_pred = self.model(x=x, edge_index=edge_index, **kwargs)
+            graph = self.type_conversion(x, edge_index, edge_attr)
+            zero_mask_pred = self.model(graph, cuda=True)
 
             # Store related predictions for further evaluation.
             related_preds.append({'zero': zero_mask_pred[node_idx],
@@ -654,7 +671,7 @@ class GradCAM(WalkBase):
     def __init__(self, model, epochs=100, lr=0.01, explain_graph=False, molecule=False):
         super().__init__(model, epochs, lr, explain_graph, molecule)
 
-    def forward(self, x: Tensor, edge_index: Tensor, **kwargs)\
+    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Tensor, **kwargs)\
             -> Union[Tuple[None, List, List[Dict]], Tuple[Dict, List, List[Dict]]]:
         """
         Given a sample, this function will return its predicted masks and corresponding predictions
@@ -710,7 +727,7 @@ class GradCAM(WalkBase):
 
         with torch.no_grad():
             with self.connect_mask(self):
-                related_preds = self.eval_related_pred(x, edge_index, masks, **kwargs)
+                related_preds = self.eval_related_pred(x, edge_index, edge_attr, masks, **kwargs)
 
 
 

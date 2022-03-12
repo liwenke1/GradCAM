@@ -12,12 +12,38 @@ from definitions import ROOT_DIR
 import os
 import pickle as pkl
 import numpy as np
+import json
 
 
 def index_to_mask(index, size):
     mask = torch.zeros(size, dtype=torch.bool, device=index.device)
     mask[index] = 1
     return mask
+
+
+def read_json(filename):
+    #读取文件
+    with open(filename,'r') as f:
+        file = json.load(f)
+    #文件内容读取到torch.tensor()中
+    x = torch.tensor(file['node_features'],dtype=torch.float64)
+
+    edge_index_list = []
+    for edge in file['graph']:
+        edge_index_list.append([edge[0],edge[2]])
+    edge_index = torch.tensor(edge_index_list,dtype=torch.long).t()
+    
+    edge_attr_list = []
+    for edge in file['graph']:
+        edge_attr_list.append([edge[1]])
+    edge_attr = torch.tensor(edge_attr_list)
+
+    y=[]
+    y.append([file['target']])
+    y=torch.tensor(y)
+    
+    data=Data(x=x,edge_index=edge_index,edge_attr=edge_attr,y=y)
+    return data
 
 
 def random_node_splits(data, num_classes):
@@ -198,3 +224,27 @@ class BA_Shape(InMemoryDataset):
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
+
+class Devign(InMemoryDataset):
+    def __init__(self, root, name, transform=None, pre_transform=None):
+        self.name = name
+        super(Devign, self).__init__(root, transform, pre_transform)
+        self.data, self.slices = torch.load(self.processed_paths[0])
+
+    @property
+    def processed_file_names(self):
+        return [f'Devign.pt']
+
+    def process(self):
+        data_list = []
+        with open('/home/DIG-main/dig/xgraph/GNN-LRP/benchmark/data/dataset_rec.txt','r') as f:
+            dataset_path = f.readlines()
+        i = 0
+        for path in dataset_path:
+            data = read_json(path.strip())
+            if(data.num_nodes >= 15):
+                data_list.append(data)
+                i += 1
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
+        
